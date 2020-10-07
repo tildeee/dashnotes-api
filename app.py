@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, make_response
 from flask import request
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
@@ -6,6 +6,7 @@ from flask_login import LoginManager, UserMixin, login_required, login_user, log
 from authlib.integrations.flask_client import OAuth
 from loginpass import create_flask_blueprint
 from loginpass import Twitter, GitHub, Google
+from flask_cors import CORS, cross_origin
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -13,6 +14,7 @@ app.config['SQLALCHEMY_DATABASE_URI'] = "postgresql+psycopg2://postgres:postgres
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
 
+CORS(app)
 
 app.secret_key = 'c1662e05-476a-4ce6-8759-2fcbc99e7c06'
 
@@ -21,13 +23,18 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 oauth = OAuth(app)
 
-app.config['GITHUB_CLIENT_ID'] = 'Iv1.13f31d855859ad99'
-app.config['GITHUB_CLIENT_SECRET'] = '2a6c3f7e7a91c8f9bf5f7cd7a3d0f7d2182d956d'
+
 
 @login_manager.user_loader
 def load_user(user_id):
     return UsersModel.query.get(user_id)
 
+@app.after_request
+def after_request_func(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    return response
+
+@cross_origin()
 def handle_authorize(remote, raw_token, user_info):
     token = str(raw_token)
     user_gh_id = user_info['sub']
@@ -80,6 +87,7 @@ class StickiesModel(db.Model):
 
 
 @app.route('/')
+@cross_origin()
 def hello():
     return {
         "hello": "world"
@@ -104,8 +112,9 @@ def handle_stickies():
                 "body": sticky.body
             } for sticky in stickies
         ]
-        return {"stickies": results}
-    return {"lol": "something else"}
+        response = make_response({"message": "ok", "stickies": results})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        return response
 
 @app.route('/stickies/<sticky_id>', methods=['DELETE', 'GET'])
 def handle_sticky(sticky_id):

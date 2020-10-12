@@ -1,5 +1,5 @@
 from flask import Flask, make_response
-from flask import request
+from flask import request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_cors import CORS, cross_origin
@@ -18,12 +18,18 @@ class UsersModel(db.Model):
     __tablename__ = 'users'
 
     id = db.Column(db.Integer, primary_key=True)
-    nickname = db.Column(db.String())
-    github_id = db.Column(db.String())
+    name = db.Column(db.String())
+    username = db.Column(db.String())
+    auth_provider = db.Column(db.String())
+    auth_id = db.Column(db.String())
+    avatar_url = db.Column(db.String())
 
-    def __init__(self, nickname, github_id):
-        self.nickname = nickname
-        self.github_id = github_id
+    def __init__(self, name, auth_provider, auth_id, username, avatar_url):
+        self.name = name
+        self.auth_provider = auth_provider
+        self.auth_id = auth_id
+        self.username = username
+        self.avatar_url = avatar_url
 
     def __repr__(self):
         return f"<User {self.nickname}>"
@@ -63,11 +69,25 @@ def whatever_github(code):
     print("omaskfj;alsdkjflaskdjf")
     print(auth_r)
     access_token = auth_r['access_token']
-    omg = requests.get('https://api.github.com/user', headers={
+    user_details = requests.get('https://api.github.com/user', headers={
         "Authorization": f"Bearer {access_token}",
         "Accept": "application/json"
-    })
-    return omg.json()
+    }).json()
+
+    user = UsersModel.query.filter_by(auth_provider="GITHUB", auth_id=str(user_details['id'])).first()
+
+    if user is None:
+        user = UsersModel(
+            name=user_details['name'],
+            auth_provider="GITHUB",
+            auth_id=user_details['id'],
+            username=user_details['login'],
+            avatar_url=user_details['avatar_url'],
+        )
+
+    return jsonify(name=user.name,
+        username=user.username,
+        avatar_url=user.avatar_url)
 
 @app.route('/authenticate/<code>', methods=['GET'])
 def authenticate(code):

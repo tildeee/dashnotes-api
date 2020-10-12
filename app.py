@@ -2,64 +2,19 @@ from flask import Flask, make_response
 from flask import request
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
-from flask_login import LoginManager, UserMixin, login_required, login_user, logout_user
-from authlib.integrations.flask_client import OAuth
-from loginpass import create_flask_blueprint
-from loginpass import Twitter, GitHub, Google
 from flask_cors import CORS, cross_origin
+import requests
+import os
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SQLALCHEMY_DATABASE_URI'] = "postgresql+psycopg2://postgres:postgres@localhost:5432/dashnotes_api"
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get("SQLALCHEMY_DATABASE_URI")
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
 
 CORS(app)
 
-app.secret_key = 'c1662e05-476a-4ce6-8759-2fcbc99e7c06'
-
-
-login_manager = LoginManager()
-login_manager.init_app(app)
-oauth = OAuth(app)
-
-
-
-@login_manager.user_loader
-def load_user(user_id):
-    return UsersModel.query.get(user_id)
-
-@app.after_request
-def after_request_func(response):
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    return response
-
-@cross_origin()
-def handle_authorize(remote, raw_token, user_info):
-    token = str(raw_token)
-    user_gh_id = user_info['sub']
-    user = UsersModel.query.filter_by(github_id=user_gh_id).first()
-    if user is None:
-        new_user = UsersModel(user_info['name'], user_gh_id)
-        db.session.add(new_user)
-        db.session.commit()
-        login_user(new_user)
-        return {"message": f"you did it....... it's new..... {token} ................ {user_info}"}
-    else:
-        login_user(user)
-        return {"message": "you did it....... it's old....."}
-    return {"message":f"wow. remote: {remote}, token: {token}, user_info: {user_info}"}
-
-bp = create_flask_blueprint([GitHub], oauth, handle_authorize)
-app.register_blueprint(bp, url_prefix='')
-
-@app.route("/logout")
-@login_required
-def logout():
-    logout_user()
-    return {"message": "you logged out...."}
-
-class UsersModel(db.Model, UserMixin):
+class UsersModel(db.Model):
     __tablename__ = 'users'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -78,20 +33,48 @@ class StickiesModel(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     body = db.Column(db.String())
+    username = db.Column(db.String())
 
-    def __init__(self, body):
+    def __init__(self, body, username):
         self.body = body
+        self.username = username
 
     def __repr__(self):
         return f"<Sticky {self.body}>"
 
 
 @app.route('/')
-@cross_origin()
 def hello():
     return {
         "hello": "world"
     }
+
+@app.route('/whatever/github/<code>', methods=['POST'])
+def whatever_github(code):
+    r = requests.post('https://github.com/login/oauth/access_token', params={
+        "client_id": os.environ.get("GITHUB_CLIENT_ID"),
+        "client_secret": os.environ.get("GITHUB_CLIENT_SECRET"),
+        "code": code
+    }, headers={
+        "Accept": "application/json"
+    })
+    print(r)
+    auth_r = r.json()
+    print("omaskfj;alsdkjflaskdjf")
+    print(auth_r)
+    access_token = auth_r['access_token']
+    omg = requests.get('https://api.github.com/user', headers={
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/json"
+    })
+    return omg.json()
+
+@app.route('/authenticate/<code>', methods=['GET'])
+def authenticate(code):
+    print(code)
+    response = make_response({"authenticate": f"{code}"})
+    print(response)
+    return response
 
 @app.route('/stickies', methods=['POST', 'GET'])
 def handle_stickies():
@@ -106,10 +89,42 @@ def handle_stickies():
             return {"lol":"not json"}
     elif request.method == 'GET':
         stickies = StickiesModel.query.all()
+        auth_header = request.headers.get('Authorization')
         results = [
             {
                 "id": sticky.id,
-                "body": sticky.body
+                "body": sticky.body,
+                "username": sticky.username
+            } for sticky in stickies
+        ]
+        response = make_response({"message": "ok", "stickies": results})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        return response
+
+@app.route('/my-stickies', methods=['POST', 'GET'])
+def handle_my_stickies():
+    if request.method == 'POST':
+        if request.is_json:
+            print(f"heaedersrsrasdfasdfasfd {request.headers}")
+            auth_header = request.headers.get('Authorization')
+            username = auth_header[7:]
+            data = request.get_json()
+            new_sticky = StickiesModel(body=data['body'], username=username)
+            db.session.add(new_sticky)
+            db.session.commit()
+            return {"message": f"sticky {new_sticky.body} by {new_sticky.username} has been created successfully."}
+        else:
+            return {"lol":"not json"}
+    elif request.method == 'GET':
+        auth_header = request.headers.get('Authorization')
+        username = auth_header.replace("Bearer ", "")
+        stickies = StickiesModel.query.filter_by(username=username)
+        results = [
+            {
+                "id": sticky.id,
+                "body": sticky.body,
+                "auth_header": auth_header,
+                "username": sticky.username
             } for sticky in stickies
         ]
         response = make_response({"message": "ok", "stickies": results})

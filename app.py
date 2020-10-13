@@ -51,6 +51,9 @@ class Note(db.Model):
     def __repr__(self):
         return f"<Note {self.body}>"
 
+@app.route('/')
+def hello_world():
+    return make_response({"Hello": "World"})
 
 @app.route('/auth/callback/gh/<code>', methods=['POST'])
 def github_callback(code):

@@ -15,7 +15,7 @@ migrate = Migrate(app, db)
 
 CORS(app)
 
-class UsersModel(db.Model):
+class User(db.Model):
     __tablename__ = 'users'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -24,6 +24,8 @@ class UsersModel(db.Model):
     auth_provider = db.Column(db.String())
     auth_id = db.Column(db.String())
     avatar_url = db.Column(db.String())
+
+    notes = db.relationship('Note', backref='user')
 
     def __init__(self, name, auth_provider, auth_id, username, avatar_url):
         self.name = name
@@ -35,21 +37,19 @@ class UsersModel(db.Model):
     def __repr__(self):
         return f"<User name: {self.name}, username: {self.username}, auth_provider: {self.auth_provider}>"
 
-class StickiesModel(db.Model):
-    __tablename__ = 'stickies'
+class Note(db.Model):
+    __tablename__ = 'notes'
 
     id = db.Column(db.Integer, primary_key=True)
     body = db.Column(db.String())
-    user_id = db.Column(db.Integer())
-    username = db.Column(db.String())
 
-    def __init__(self, body, user_id, username):
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+
+    def __init__(self, body):
         self.body = body
-        self.user_id = user_id
-        self.username = username
 
     def __repr__(self):
-        return f"<Sticky {self.body}>"
+        return f"<Note {self.body}>"
 
 
 @app.route('/auth/callback/gh/<code>', methods=['POST'])
@@ -61,10 +61,7 @@ def github_callback(code):
     }, headers={
         "Accept": "application/json"
     })
-    print(r)
     auth_r = r.json()
-    print("omaskfj;alsdkjflaskdjf")
-    print(auth_r)
     access_token = auth_r['access_token']
 
     user_details = requests.get('https://api.github.com/user', headers={
@@ -72,16 +69,18 @@ def github_callback(code):
         "Accept": "application/json"
     }).json()
 
-    user = UsersModel.query.filter_by(auth_provider="GITHUB", auth_id=str(user_details['id'])).first()
+    user = User.query.filter_by(auth_provider="GITHUB", auth_id=str(user_details['id'])).first()
 
     if user is None:
-        user = UsersModel(
+        user = User(
             name=user_details['name'],
             auth_provider="GITHUB",
             auth_id=user_details['id'],
             username=user_details['login'],
             avatar_url=user_details['avatar_url'],
         )
+        db.session.add(user)
+        db.session.commit()
 
     auth_code = jwt.encode({"auth_id": user.auth_id, "auth_provider": user.auth_provider}, os.environ.get("SECRET"), algorithm='HS256')
 
@@ -92,25 +91,32 @@ def github_callback(code):
 
 @app.route('/users')
 def get_user_details():
-    data = request.get_json()
-
     auth_header = request.headers.get('Authorization')
     token = auth_header.replace("Bearer ", "")
     decoded_token = jwt.decode(token, os.environ.get("SECRET"), algorithms=['HS256'])
 
-    user = UsersModel.query.filter_by(auth_provider=decoded_token['auth_provider'], auth_id=decoded_token['auth_id']).first()
+    user = User.query.filter_by(auth_provider=decoded_token['auth_provider'], auth_id=str(decoded_token['auth_id'])).first()
+    user_stickies = [
+         {
+             "id": sticky.id,
+             "body": sticky.body,
+             "user_id": sticky.user.id,
+             "username": sticky.user.name
+         } for sticky in user.notes
+     ]
     return jsonify(name=user.name,
         username=user.username,
-        avatar_url=user.avatar_url)
+        avatar_url=user.avatar_url,
+        stickies=user_stickies)
 
 @app.route('/stickies', methods=['GET'])
 def handle_stickies():
-    stickies = StickiesModel.query.all()
+    stickies = Note.query.all()
     results = [
         {
             "id": sticky.id,
             "body": sticky.body,
-            "username": sticky.username
+            "username": sticky.user.name
         } for sticky in stickies
     ]
     response = make_response({"message": "ok", "stickies": results})
@@ -125,33 +131,36 @@ def handle_my_stickies():
         token = auth_header.replace("Bearer ", "")
         decoded_token = jwt.decode(token, os.environ.get("SECRET"), algorithms=['HS256'])
 
-        user = UsersModel.query.filter_by(auth_provider=decoded_token['auth_provider'], auth_id=decoded_token['auth_id']).first()
+        user = User.query.filter_by(auth_provider=decoded_token['auth_provider'], auth_id=str(decoded_token['auth_id'])).first()
 
-        new_sticky = StickiesModel(body=data['body'], user_id=str(user.id), username=user.name)
+        new_sticky = Note(body=data['body'])
+        user.notes.append(new_sticky)
+
         db.session.add(new_sticky)
         db.session.commit()
 
         new_sticky_data = {
             "id": new_sticky.id,
             "body": new_sticky.body,
-            "user_id": new_sticky.user_id,
-            "username": new_sticky.username
+            "user_id": new_sticky.user.id,
+            "username": new_sticky.user.name
         }
-        return {"message": f"sticky {new_sticky.body} by {new_sticky.username} has been created successfully.", "sticky": new_sticky_data}
+        return {"message": f"sticky {new_sticky.body} by {new_sticky.user.name} has been created successfully.", "sticky": new_sticky_data}
     elif request.method == 'GET':
         auth_header = request.headers.get('Authorization')
         token = auth_header.replace("Bearer ", "")
         decoded_token = jwt.decode(token, os.environ.get("SECRET"), algorithms=['HS256'])
 
-        user = UsersModel.query.filter_by(auth_provider=decoded_token['auth_provider'], auth_id=decoded_token['auth_id']).first()
+        user = User.query.filter_by(auth_provider=decoded_token['auth_provider'], auth_id=str(decoded_token['auth_id'])).first()
 
-        stickies = StickiesModel.query.filter_by(user_id=str(user.id))
+        stickies = user.notes
+
         results = [
             {
                 "id": sticky.id,
                 "body": sticky.body,
-                "user_id": sticky.user_id,
-                "username": sticky.username
+                "user_id": sticky.user.id,
+                "username": sticky.user.name
             } for sticky in stickies
         ]
         response = make_response({"message": "ok", "stickies": results})
@@ -159,7 +168,7 @@ def handle_my_stickies():
 
 @app.route('/stickies/<sticky_id>', methods=['DELETE', 'GET'])
 def handle_sticky(sticky_id):
-    sticky = StickiesModel.query.get_or_404(sticky_id)
+    sticky = Note.query.get_or_404(sticky_id)
 
     if request.method == 'GET':
         response = {

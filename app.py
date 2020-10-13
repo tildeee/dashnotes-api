@@ -83,24 +83,8 @@ def github_callback(code):
             avatar_url=user_details['avatar_url'],
         )
 
-#     successful login! we have a user
-#     send back encoded thing for client to save
-#     save encoded thingy to localstorage
-#     localStorage.setItem('REACT_TOKEN_AUTH', response.data.authenticate);
-
-# idk i'm encoding the github auth id i guess? for fun?
     auth_code = jwt.encode({"auth_id": user.auth_id, "auth_provider": user.auth_provider}, os.environ.get("SECRET"), algorithm='HS256')
 
-# i wanted to do this form but it looks stupid as hell when using axios
-#     user_response = {
-#         "user":user.username,
-#         "avatar_url":user.avatar_url,
-#         "auth_id":auth_token.decode('UTF-8')
-#     }
-#
-#     return jsonify(status="OK", data=user_response)
-
-#     send back user data
     return jsonify(name=user.name,
         username=user.username,
         avatar_url=user.avatar_url,
@@ -111,110 +95,55 @@ def get_user_details():
     data = request.get_json()
 
     auth_header = request.headers.get('Authorization')
-    print("xTHIS IS token**********")
     token = auth_header.replace("Bearer ", "")
-    print(token)
     decoded_token = jwt.decode(token, os.environ.get("SECRET"), algorithms=['HS256'])
-    print(decoded_token)
 
     user = UsersModel.query.filter_by(auth_provider=decoded_token['auth_provider'], auth_id=decoded_token['auth_id']).first()
     return jsonify(name=user.name,
         username=user.username,
         avatar_url=user.avatar_url)
 
-@app.route('/login')
-def login():
-    user_details = requests.get('https://api.github.com/user', headers={
-        "Authorization": f"Bearer {access_token}",
-        "Accept": "application/json"
-    }).json()
-
-    user = UsersModel.query.filter_by(auth_provider="GITHUB", auth_id=str(user_details['id'])).first()
-
-    if user is None:
-        user = UsersModel(
-            name=user_details['name'],
-            auth_provider="GITHUB",
-            auth_id=user_details['id'],
-            username=user_details['login'],
-            avatar_url=user_details['avatar_url'],
-        )
-
-    return jsonify(name=user.name,
-        username=user.username,
-        avatar_url=user.avatar_url)
-
-@app.route('/authenticate/<code>', methods=['GET'])
-def authenticate(code):
-    print(code)
-    response = make_response({"authenticate": f"{code}"})
-    print(response)
-    return response
-
-@app.route('/stickies', methods=['POST', 'GET'])
+@app.route('/stickies', methods=['GET'])
 def handle_stickies():
-    if request.method == 'POST':
-        if request.is_json:
-            data = request.get_json()
-            new_sticky = StickiesModel(body=data['body'])
-            db.session.add(new_sticky)
-            db.session.commit()
-            return {"message": f"sticky {new_sticky.body} has been created successfully."}
-        else:
-            return {"lol":"not json"}
-    elif request.method == 'GET':
-        stickies = StickiesModel.query.all()
-        auth_header = request.headers.get('Authorization')
-        results = [
-            {
-                "id": sticky.id,
-                "body": sticky.body,
-                "username": sticky.username
-            } for sticky in stickies
-        ]
-        response = make_response({"message": "ok", "stickies": results})
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        return response
+    stickies = StickiesModel.query.all()
+    results = [
+        {
+            "id": sticky.id,
+            "body": sticky.body,
+            "username": sticky.username
+        } for sticky in stickies
+    ]
+    response = make_response({"message": "ok", "stickies": results})
+    return response
 
 @app.route('/my-stickies', methods=['POST', 'GET'])
 def handle_my_stickies():
     if request.method == 'POST':
-        if request.is_json:
-            data = request.get_json()
+        data = request.get_json()
 
-            auth_header = request.headers.get('Authorization')
-            print("xTHIS IS token**********")
-            token = auth_header.replace("Bearer ", "")
-            print(token)
-            decoded_token = jwt.decode(token, os.environ.get("SECRET"), algorithms=['HS256'])
-            print(decoded_token)
-
-            user = UsersModel.query.filter_by(auth_provider=decoded_token['auth_provider'], auth_id=decoded_token['auth_id']).first()
-
-            new_sticky = StickiesModel(body=data['body'], user_id=str(user.id), username=user.name)
-            db.session.add(new_sticky)
-            db.session.commit()
-
-            new_sticky_data = {
-                "id": new_sticky.id,
-                "body": new_sticky.body,
-                "user_id": new_sticky.user_id,
-                "username": new_sticky.username
-            }
-            return {"message": f"sticky {new_sticky.body} by {new_sticky.username} has been created successfully.", "sticky": new_sticky_data}
-        else:
-            return {"lol":"not json"}
-    elif request.method == 'GET':
         auth_header = request.headers.get('Authorization')
-        print("THIS IS token**********")
         token = auth_header.replace("Bearer ", "")
-        print(token)
         decoded_token = jwt.decode(token, os.environ.get("SECRET"), algorithms=['HS256'])
-        print(decoded_token)
 
         user = UsersModel.query.filter_by(auth_provider=decoded_token['auth_provider'], auth_id=decoded_token['auth_id']).first()
 
-        print(user)
+        new_sticky = StickiesModel(body=data['body'], user_id=str(user.id), username=user.name)
+        db.session.add(new_sticky)
+        db.session.commit()
+
+        new_sticky_data = {
+            "id": new_sticky.id,
+            "body": new_sticky.body,
+            "user_id": new_sticky.user_id,
+            "username": new_sticky.username
+        }
+        return {"message": f"sticky {new_sticky.body} by {new_sticky.username} has been created successfully.", "sticky": new_sticky_data}
+    elif request.method == 'GET':
+        auth_header = request.headers.get('Authorization')
+        token = auth_header.replace("Bearer ", "")
+        decoded_token = jwt.decode(token, os.environ.get("SECRET"), algorithms=['HS256'])
+
+        user = UsersModel.query.filter_by(auth_provider=decoded_token['auth_provider'], auth_id=decoded_token['auth_id']).first()
 
         stickies = StickiesModel.query.filter_by(user_id=str(user.id))
         results = [
@@ -226,7 +155,6 @@ def handle_my_stickies():
             } for sticky in stickies
         ]
         response = make_response({"message": "ok", "stickies": results})
-        response.headers['Access-Control-Allow-Origin'] = '*'
         return response
 
 @app.route('/stickies/<sticky_id>', methods=['DELETE', 'GET'])
